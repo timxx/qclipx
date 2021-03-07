@@ -6,7 +6,7 @@ with open("README.md", "r") as f:
 
 
 setup(name="qclipx",
-      version="1.0.0",
+      version="1.0.1",
       author="Weitian Leung",
       author_email="weitianleung@gmail.com",
       description='Cross platform clipboard tool',

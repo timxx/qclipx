@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 # *
-# * Copyright (c) 2020 Weitian Leung
+# * Copyright (c) 2020-2021 Weitian Leung
 # *
 # * This file is part of qclipx.
 # *
@@ -14,6 +14,7 @@ from PySide2.QtWidgets import *
 from PySide2.QtCore import *
 from zipfile import (ZipFile, BadZipFile)
 from io import BytesIO
+from pyhexedit import PyHexEdit
 
 import sys
 import re
@@ -343,345 +344,6 @@ class MyChunks:
         self._chunks = [MyChunk() for i in range(size)]
 
 
-class MyHexView(QAbstractScrollArea):
-    """A Simple Hex View"""
-
-    def __init__(self, parent=None):
-        super(MyHexView, self).__init__(parent)
-
-        # use fixed font for better look in ascii view
-        font = self._getFixedFont()
-        self.setFont(font)
-
-        self._chunks = []
-        self._hexPerRow = 16  # each line contains 16 hex
-        self._charW = self.fontMetrics().horizontalAdvance('F')
-        self._charH = self.fontMetrics().height() + dpiScaled(3)  # extra spaces
-        self._adrSepX = self._charW * 9  # address area separator
-        self._hexStartX = self._adrSepX + self._charW
-        self._hexSepX = self._hexStartX + \
-            self._charW * (4 * self._hexPerRow - 1)
-        self._asciiStartX = self._hexSepX + self._charW
-
-        # cursor position, (row, col) in _chunks
-        self._cursorPos = QPoint(0, 0)
-        # active in ascii or not
-        self._isInAscii = False
-
-        # selection end point, (-1, -1) means no selection
-        self._selEndPos = QPoint(-1, -1)
-
-    def showData(self, data):
-        self._chunks = MyChunks(data, self._hexPerRow)
-        self._cursorPos = QPoint(0, 0)
-        self._selEndPos = QPoint(-1, -1)
-        self.viewport().update()
-        self._adjust()
-
-    def mouseMoveEvent(self, event):
-        if len(self._chunks) > 0 and event.buttons() & Qt.LeftButton:
-            if self._selEndPos != QPoint(-1, -1):
-                self._updateSelection()
-
-            self._selEndPos, _ = self._posToRC(event.pos())
-            self._updateSelection()
-
-    def mousePressEvent(self, event):
-        if len(self._chunks) == 0:
-            return
-        if self._selEndPos != QPoint(-1, -1):
-            self._updateSelection()
-            self._selEndPos = QPoint(-1, -1)
-
-        self._updateCursor()  # clear the old cursor
-        self._cursorPos, self._isInAscii = self._posToRC(event.pos())
-        self._updateCursor()
-
-    def resizeEvent(self, event):
-        self._adjust()
-
-    def paintEvent(self, event):
-        row = len(self._chunks)
-        if row == 0:
-            return
-        painter = QPainter(self.viewport())
-        # row in viewport, must be same as _adjust
-        rowShown = int((self.viewport().height() -
-                        self._charH / 4) / self._charH)
-        if rowShown > row:
-            rowShown = row
-
-        # horizontal offset
-        offsetX = self.horizontalScrollBar().value() * self._charW
-        # vertical offset
-        offsetY = self.verticalScrollBar().value() * self._charH
-
-        # draw the selection
-        # might optimize in another way :(
-        if self._selEndPos != QPoint(-1, -1):
-            for x in (True, False):
-                rects = self._rcToRect(self._cursorPos, self._selEndPos, x)
-                for rc in rects:
-                    painter.fillRect(rc, QColor(135, 170, 215))
-
-        self._drawAdr(painter, rowShown, offsetX)
-        self._drawHex(painter, rowShown, offsetX)
-
-        # draw cursor if no selection
-        if self._selEndPos == QPoint(-1, -1):
-            self._drawCursor(painter, offsetX, offsetY)
-
-    def _drawAdr(self, painter, row, offsetX):
-        painter.save()
-
-        painter.setPen(QColor(149, 22, 22))
-        x = 0
-        y = self._charH
-        n = self.verticalScrollBar().value() * self._hexPerRow
-        for i in range(0, row):
-            painter.drawText(x - offsetX, y, "%08X" % n)
-            y += self._charH
-            n += self._hexPerRow
-
-        # draw separator
-        painter.setPen(QColor(0, 100, 0))
-        painter.drawLine(self._adrSepX - offsetX, 0,
-                         self._adrSepX - offsetX, row * self._charH)
-
-        painter.restore()
-
-    def _drawHex(self, painter, row, offsetX):
-        """ draw hex data and ascii """
-        painter.save()
-
-        x = self._hexStartX
-        asciiX = self._asciiStartX
-        y = self._charH
-        w = self._charW * 4
-        r = self.verticalScrollBar().value()
-        for i in range(0, row):
-            n = 1
-            for hex in self._chunks[i + r]:
-                if n % 2 == 0:
-                    painter.setPen(QColor(0, 0, 255))
-                else:
-                    painter.setPen(QColor(0, 0, 0))
-                n += 1
-                painter.drawText(x - offsetX, y, str(hex, 'ascii'))
-                self._drawAscii(painter, asciiX - offsetX, y, hex)
-                x += w
-                asciiX += self._charW
-            y += self._charH
-            x = self._hexStartX
-            asciiX = self._asciiStartX
-
-        # separator
-        painter.setPen(QColor(0, 100, 0))
-        painter.drawLine(self._hexSepX - offsetX, 0,
-                         self._hexSepX - offsetX, row * self._charH)
-
-        painter.restore()
-
-    def _drawAscii(self, painter, x, y, hex):
-        painter.save()
-
-        n = int(hex, 16)
-        # invisible char use '.' instead
-        if n > 0x7E or n < 0x20:
-            ch = '.'
-        else:
-            ch = chr(n)
-
-        painter.setPen(QColor(0, 0, 0))
-        painter.drawText(x, y, ch)
-
-        painter.restore()
-
-    def _drawCursor(self, painter, offsetX, offsetY):
-        painter.save()
-
-        color = QColor(255, 0, 0)
-        if not self.isActiveWindow():
-            color = QColor(128, 128, 128)
-        painter.setPen(color)
-        pos = self._rcToPos(self._cursorPos, self._isInAscii)
-        x = pos.x() - offsetX
-        y = pos.y() - offsetY
-        painter.drawLine(x, y, x, y + self._charH)
-
-        # under line
-        pen = QPen(color)
-        pen.setWidth(dpiScaled(2))
-        painter.setPen(pen)
-
-        x = pos.x() - offsetX + dpiScaled(1)
-        y = pos.y() + self._charH - offsetY
-
-        w = {True: self._charW, False: 2 * self._charW}
-        painter.drawLine(x, y, x + w[self._isInAscii], y)
-
-        pos = self._rcToPos(self._cursorPos, not self._isInAscii)
-        x = pos.x() - offsetX + dpiScaled(1)
-        y = pos.y() + self._charH - offsetY
-        painter.drawLine(x, y, x + w[not self._isInAscii], y)
-
-        painter.restore()
-
-    def _adjust(self):
-        width = self._asciiStartX  # at least need this
-        if len(self._chunks) > 0:
-            width += len(self._chunks[0]) * self._charW
-
-        self.horizontalScrollBar().setRange(0, width - self.viewport().width())
-        self.horizontalScrollBar().setPageStep(self.viewport().width())
-
-        # leave some spaces for the last line
-        rowShown = int((self.viewport().height() -
-                        self._charH / 4) / self._charH)
-        totalRow = len(self._chunks)
-        self.verticalScrollBar().setRange(0, totalRow - rowShown)
-        self.verticalScrollBar().setPageStep(rowShown)
-
-    def _isFixedPitch(self, font):
-        fontInfo = QFontInfo(font)
-        return fontInfo.fixedPitch()
-
-    def _getFixedFont(self):
-        font = QFont("Monospace")
-        if self._isFixedPitch(font):
-            return font
-
-        font.setStyleHint(QFont.Monospace)
-        if self._isFixedPitch(font):
-            return font
-
-        font.setStyleHint(QFont.TypeWriter)
-        if self._isFixedPitch(font):
-            return font
-
-        # for Windows
-        font.setFamily("Courier")
-        return font
-
-    def _rcToPos(self, rcPoint, isAscii=False):
-        """ convert (row, col) to client rect position """
-        if isAscii:
-            x = self._asciiStartX + rcPoint.x() * self._charW
-        else:
-            x = self._hexStartX + rcPoint.x() * 4 * self._charW
-        y = rcPoint.y() * self._charH
-
-        return QPoint(x - dpiScaled(1), y + dpiScaled(4))
-
-    def _posToRC(self, pos):
-        """return (row, col) and whether is in ascii view"""
-        isAscii = False
-        if pos.x() >= self._hexSepX:
-            isAscii = True
-            c = int((pos.x() - self._asciiStartX) / self._charW)
-        else:
-            c = int((pos.x() + 2 * self._charW -
-                     self._hexStartX) / self._charW / 4)
-
-        r = int((pos.y() - dpiScaled(5)) / self._charH) + \
-            self.verticalScrollBar().value()
-        row = len(self._chunks)
-
-        if r >= row:
-            r = row - 1
-            if c < 0:
-                c = 0
-            else:
-                c = len(self._chunks[r]) - 1
-        elif r < 0:
-            r = 0
-
-        if c >= len(self._chunks[r]):
-            c = len(self._chunks[r]) - 1
-        elif c < 0:
-            c = 0
-
-        return QPoint(c, r), isAscii
-
-    def _normalRC(self, rc1, rc2):
-        begin = rc1
-        end = rc2
-
-        if rc1.y() == rc2.y():
-            if rc1.x() > rc2.x():
-                begin = rc2
-                end = rc1
-        elif rc1.y() > rc2.y():
-            begin = rc2
-            end = rc1
-
-        return begin, end
-
-    def _calcWidth(self, n, isInAscii):
-        if isInAscii:
-            return (n + 1) * self._charW
-        return (2 * n + 1) * 2 * self._charW
-
-    def _rcToRect(self, begin, end=None, isInAscii=False):
-        """calc rects from begin to end"""
-        if end == None:
-            end = begin
-
-        startX = {True: self._asciiStartX, False: self._hexStartX}
-        offsetX = self.horizontalScrollBar().value() * self._charW + dpiScaled(1)
-        offsetY = self.verticalScrollBar().value() * self._charH - dpiScaled(4)
-        offsetW = dpiScaled(2)
-        offsetH = dpiScaled(1)
-
-        posBegin, posEnd = self._normalRC(begin, end)
-
-        if isInAscii:
-            x = self._asciiStartX + posBegin.x() * self._charW
-        else:
-            x = self._hexStartX + posBegin.x() * 4 * self._charW
-        y = posBegin.y() * self._charH
-
-        # the same row
-        if posEnd.y() == posBegin.y():
-            w = self._calcWidth(posEnd.x() - posBegin.x(), isInAscii)
-
-            return [QRect(x - offsetX, y - offsetY, w + offsetW, self._charH + offsetH)]
-
-        # first row
-        w = self._calcWidth(self._hexPerRow - posBegin.x() - 1, isInAscii)
-        rects = [QRect(x - offsetX, y - offsetY, w +
-                       offsetW, self._charH + offsetH)]
-
-        # middle rows
-        x = startX[isInAscii]
-        r = posBegin.y() + 1
-        if r < posEnd.y():
-            y = r * self._charH
-            w = self._calcWidth(self._hexPerRow - 1, isInAscii)
-            h = self._charH * (posEnd.y() - r)
-            rects.append(QRect(x - offsetX, y - offsetY,
-                               w + offsetW, h + offsetH))
-
-        # the last row
-        w = self._calcWidth(posEnd.x(), isInAscii)
-        y = posEnd.y() * self._charH
-        rects.append(QRect(x - offsetX, y - offsetY,
-                           w + offsetW, self._charH + offsetH))
-
-        return rects
-
-    def _updateCursor(self):
-        for x in (True, False):
-            rect = self._rcToRect(self._cursorPos, isInAscii=x)
-            self.viewport().update(rect[0])
-
-    def _updateSelection(self):
-        for x in (True, False):
-            rects = self._rcToRect(self._cursorPos, self._selEndPos, x)
-            for rc in rects:
-                self.viewport().update(rc)
-
-
 class MyCentralWidget(QTabWidget):
     def __init__(self, parent=None):
         super(MyCentralWidget, self).__init__(parent)
@@ -696,7 +358,7 @@ class MyCentralWidget(QTabWidget):
         self.treeWidget = MyTreeWidget()
         self.treeWidget.fileClicked.connect(self._onFileClicked)
 
-        self.hexView = MyHexView()
+        self.hexView = PyHexEdit()
 
         self.addTab(self.editor, "Text Browser")
         self.addTab(MyScrollArea(self.label, self), "Image Viewer")
@@ -713,7 +375,7 @@ class MyCentralWidget(QTabWidget):
             return
         elif viewMode == 2:  # Hex View
             self.setCurrentIndex(3)
-            self.hexView.showData(data)
+            self.hexView.setData(data.data())
             return
         elif is_image_mime(mime):
             self.setCurrentIndex(1)

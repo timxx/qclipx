@@ -22,7 +22,7 @@ setup(name="qclipx",
               "qclipx=qclipx.qclipx:main",
           ]
       },
-      install_requires=["PySide2"],
+      install_requires=["PySide2", "pyhexedit"],
       classifiers=[
           "License :: OSI Approved :: MIT License",
           "Operating System :: POSIX",

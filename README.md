@@ -10,6 +10,7 @@ Cross platform clipboard tool.
 ## Requirements
 
 - PySide2
+- pyhexedit
 
 
 # Install

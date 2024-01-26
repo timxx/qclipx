@@ -6,7 +6,7 @@ with open("README.md", "r") as f:
 
 
 setup(name="qclipx",
-      version="1.0.1",
+      version="1.0.2",
       author="Weitian Leung",
       author_email="weitianleung@gmail.com",
       description='Cross platform clipboard tool',
@@ -22,7 +22,7 @@ setup(name="qclipx",
               "qclipx=qclipx.qclipx:main",
           ]
       },
-      install_requires=["PySide2", "pyhexedit"],
+      install_requires=["PySide6-Essentials>=6.3.0", "pyhexedit"],
       classifiers=[
           "License :: OSI Approved :: MIT License",
           "Operating System :: POSIX",

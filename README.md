@@ -9,7 +9,7 @@ Cross platform clipboard tool.
 
 ## Requirements
 
-- PySide2
+- PySide6-Essentials
 - pyhexedit
 
 

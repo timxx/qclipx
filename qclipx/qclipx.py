@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 # *
-# * Copyright (c) 2020-2021 Weitian Leung
+# * Copyright (c) 2020-2024 Weitian Leung
 # *
 # * This file is part of qclipx.
 # *
@@ -9,9 +9,9 @@
 # *
 #
 
-from PySide2.QtGui import *
-from PySide2.QtWidgets import *
-from PySide2.QtCore import *
+from PySide6.QtGui import *
+from PySide6.QtWidgets import *
+from PySide6.QtCore import *
 from zipfile import (ZipFile, BadZipFile)
 from io import BytesIO
 from pyhexedit import PyHexEdit
@@ -127,14 +127,14 @@ def is_zip_data(data):
 
 
 class MyDockWidget(QDockWidget):
-    mimeChanged = Signal([str])
+    mimeChanged = Signal(str)
 
     def __init__(self, parent=None):
         super(MyDockWidget, self).__init__(parent)
         self.setFeatures(QDockWidget.DockWidgetMovable)
 
         self.cbMime = QComboBox()
-        self.cbMime.currentIndexChanged['QString'].connect(self.mimeChanged)
+        self.cbMime.currentIndexChanged.connect(self._onMimeIndexChanged)
         self.setWidget(self.cbMime)
 
         QApplication.clipboard().dataChanged.connect(self._init_mime)
@@ -158,6 +158,9 @@ class MyDockWidget(QDockWidget):
     def currentMime(self):
         return self.cbMime.currentText()
 
+    def _onMimeIndexChanged(self, index):
+        self.mimeChanged.emit(self.cbMime.currentText())
+
 
 class MyScrollArea(QScrollArea):
     def __init__(self, widget, parent=None):
@@ -169,7 +172,7 @@ class MyScrollArea(QScrollArea):
 
 
 class MyTreeWidget(QTreeWidget):
-    fileClicked = Signal([str])
+    fileClicked = Signal(str)
     TypeRole = Qt.UserRole + 1
     FileType = 1
     FolderType = 2
@@ -529,13 +532,12 @@ def _gui_main(app):
     window = MyWindow()
     window.show()
 
-    app.exec_()
+    app.exec()
 
 
 def _cli_main(app, mime):
     clipboard = QApplication.clipboard()
     mimeData = clipboard.mimeData()
-    widget = None
 
     if mime:
         if mimeData.hasFormat(mime):
